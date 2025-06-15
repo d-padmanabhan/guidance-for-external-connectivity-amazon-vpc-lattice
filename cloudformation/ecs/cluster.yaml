@@ -72,7 +72,6 @@ Conditions:
   cIsProd: !Equals [!Ref pEnvironment, 'prod']
 
 Resources:
-  # CloudWatch Log Group with retention policy
   rNginxLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:
@@ -84,7 +83,6 @@ Resources:
         - Key: Application
           Value: nginx-proxy
 
-  # Target Groups with improved health checks
   rNginxExtNLBTGroup443:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
@@ -276,7 +274,6 @@ Resources:
       Port: 80
       Protocol: TCP
 
-  # ECS Cluster with container insights
   rNginxCluster:
     Type: 'AWS::ECS::Cluster'
     Properties:
@@ -297,7 +294,6 @@ Resources:
         - Key: Name
           Value: !Sub '${pEnvironment}-nginx-cluster'
 
-  # Optimized Task Definition
   rNginxTask:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
@@ -347,7 +343,6 @@ Resources:
         - Key: Name
           Value: !Sub '${pEnvironment}-nginx-task'
 
-  # ECS Service with proper configuration
   rNginxService:
     Type: 'AWS::ECS::Service'
     DependsOn:
@@ -436,7 +431,6 @@ Resources:
         - Key: Environment
           Value: !Ref pEnvironment
 
-  # Enhanced IAM Roles
   rNginxTaskExecRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -497,7 +491,6 @@ Resources:
         - Key: Name
           Value: !Sub '${pEnvironment}-nginx-task-role'
 
-  # Auto Scaling with improved configuration
   rNginxScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties: 
