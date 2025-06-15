@@ -2,192 +2,312 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: Guidance - External Connectivity to Amazon VPC Lattice (Proxy)
 
 Parameters:
-  VpcId:
+  pVpcId:
     Description: The VPC id
     Type: String
     Default: ''
-  VpcCidr:
+  pVpcCidr:
     Description: The VPC CIDR block
     Type: String
     Default: ''
-  PrivateSubnet1:
+  pPrivateSubnet1:
     Description: The Private Subnet 1 id
     Type: String
     Default: ''
-  PrivateSubnet2:
+  pPrivateSubnet2:
     Description: The Private Subnet 2 id
     Type: String
     Default: ''
-  PrivateSubnet3:
+  pPrivateSubnet3:
     Description: The Private Subnet 3 id
     Type: String
     Default: ''
-  PublicSubnet1:
+  pPublicSubnet1:
     Description: The Public Subnet 1 id
     Type: String
     Default: ''
-  PublicSubnet2:
+  pPublicSubnet2:
     Description: The Public Subnet 2 id
     Type: String
     Default: ''
-  PublicSubnet3:
+  pPublicSubnet3:
     Description: The Public Subnet 3 id
     Type: String
     Default: ''
-  NginxImage:
+  pNginxImage:
     Description: Container image
     Type: String
     Default: ''
+  pEnvironment:
+    Description: Environment name (dev/staging/prod)
+    Type: String
+    Default: 'dev'
+    AllowedValues: [dev, staging, prod]
+  pDesiredTaskCount:
+    Description: Initial number of NGINX tasks
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 10
+
+Mappings:
+  EnvironmentMap:
+    dev:
+      MinCapacity: 1
+      MaxCapacity: 3
+      CPU: 512
+      Memory: 1024
+    staging:
+      MinCapacity: 2
+      MaxCapacity: 6
+      CPU: 1024
+      Memory: 2048
+    prod:
+      MinCapacity: 3
+      MaxCapacity: 9
+      CPU: 2048
+      Memory: 4096
+
+Conditions:
+  cIsProd: !Equals [!Ref pEnvironment, 'prod']
 
 Resources:
-  NginxLogGroup:
+  # CloudWatch Log Group with retention policy
+  rNginxLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:
-      LogGroupName: !Sub '/${NginxCluster}'
+      LogGroupName: !Sub '/${rNginxCluster}'
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Application
+          Value: nginx-proxy
 
-  NginxExtNLBTGroup443:
+  # Target Groups with improved health checks
+  rNginxExtNLBTGroup443:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
-      HealthCheckIntervalSeconds: 5
-      HealthCheckTimeoutSeconds: 2
-      HealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckPath: '/health'
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
       IpAddressType: ipv4
       Port: 443
       Protocol: TCP
       TargetGroupAttributes:
         - Key: proxy_protocol_v2.enabled
           Value: true
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
       TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcId
+      VpcId: !Ref pVpcId
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-ext-tg-443'
 
-  NginxExtNLBTGroup80:
+  rNginxExtNLBTGroup80:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
-      HealthCheckIntervalSeconds: 5
-      HealthCheckTimeoutSeconds: 2
-      HealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckPath: '/health'
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
       IpAddressType: ipv4
       Port: 80
       Protocol: TCP
       TargetGroupAttributes:
         - Key: proxy_protocol_v2.enabled
           Value: true
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
       TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcId
+      VpcId: !Ref pVpcId
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-ext-tg-80'
 
-  NginxExtNLB:
+  rNginxIntNLBTGroup443:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckPath: '/health'
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
+      IpAddressType: ipv4
+      Port: 443
+      Protocol: TCP
+      TargetGroupAttributes:
+        - Key: proxy_protocol_v2.enabled
+          Value: true
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-int-tg-443'
+
+  rNginxIntNLBTGroup80:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckPath: '/health'
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
+      IpAddressType: ipv4
+      Port: 80
+      Protocol: TCP
+      TargetGroupAttributes:
+        - Key: proxy_protocol_v2.enabled
+          Value: true
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-int-tg-80'
+
+  # Network Load Balancers with access logging
+  rNginxExtNLB:
     Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
     Properties:
       IpAddressType: dualstack
       Scheme: internet-facing
       Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-        - !Ref PublicSubnet3
+        - !Ref pPublicSubnet1
+        - !Ref pPublicSubnet2
+        - !Ref pPublicSubnet3
       Type: network
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: !If [cIsProd, 'true', 'false']
+        - Key: load_balancing.cross_zone.enabled
+          Value: 'true'
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Type
+          Value: external
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-ext-nlb'
 
-  NginxExtNLBListener443:
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref NginxExtNLBTGroup443
-          Type: forward
-      LoadBalancerArn: !Ref NginxExtNLB
-      Port: 443
-      Protocol: TCP
-
-  NginxExtNLBListener80:
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref NginxExtNLBTGroup80
-          Type: forward
-      LoadBalancerArn: !Ref NginxExtNLB
-      Port: 80
-      Protocol: TCP
-
-  NginxIntNLBTGroup443:
-    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
-    Properties:
-      HealthCheckIntervalSeconds: 5
-      HealthCheckTimeoutSeconds: 2
-      HealthyThresholdCount: 3
-      IpAddressType: ipv4
-      Port: 443
-      Protocol: TCP
-      TargetGroupAttributes:
-        - Key: proxy_protocol_v2.enabled
-          Value: true
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcId
-
-  NginxIntNLBTGroup80:
-    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
-    Properties:
-      HealthCheckIntervalSeconds: 5
-      HealthCheckTimeoutSeconds: 2
-      HealthyThresholdCount: 3
-      IpAddressType: ipv4
-      Port: 80
-      Protocol: TCP
-      TargetGroupAttributes:
-        - Key: proxy_protocol_v2.enabled
-          Value: true
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcId
-
-  NginxIntNLB:
+  rNginxIntNLB:
     Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
     Properties:
       IpAddressType: dualstack
       Scheme: internal
       Subnets:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-        - !Ref PrivateSubnet3
+        - !Ref pPrivateSubnet1
+        - !Ref pPrivateSubnet2
+        - !Ref pPrivateSubnet3
       Type: network
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: !If [cIsProd, 'true', 'false']
+        - Key: load_balancing.cross_zone.enabled
+          Value: 'true'
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Type
+          Value: internal
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-int-nlb'
 
-  NginxIntNLBListener443:
+  rNginxExtNLBListener443:
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-        - TargetGroupArn: !Ref NginxIntNLBTGroup443
+        - TargetGroupArn: !Ref rNginxExtNLBTGroup443
           Type: forward
-      LoadBalancerArn: !Ref NginxIntNLB
+      LoadBalancerArn: !Ref rNginxExtNLB
       Port: 443
       Protocol: TCP
 
-  NginxIntNLBListener80:
+  rNginxExtNLBListener80:
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-        - TargetGroupArn: !Ref NginxIntNLBTGroup80
+        - TargetGroupArn: !Ref rNginxExtNLBTGroup80
           Type: forward
-      LoadBalancerArn: !Ref NginxIntNLB
+      LoadBalancerArn: !Ref rNginxExtNLB
       Port: 80
       Protocol: TCP
 
-  NginxCluster:
+  rNginxIntNLBListener443:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref rNginxIntNLBTGroup443
+          Type: forward
+      LoadBalancerArn: !Ref rNginxIntNLB
+      Port: 443
+      Protocol: TCP
+
+  rNginxIntNLBListener80:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref rNginxIntNLBTGroup80
+          Type: forward
+      LoadBalancerArn: !Ref rNginxIntNLB
+      Port: 80
+      Protocol: TCP
+
+  # ECS Cluster with container insights
+  rNginxCluster:
     Type: 'AWS::ECS::Cluster'
     Properties:
       CapacityProviders:
         - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: !If [cIsProd, 0, 1]
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-cluster'
 
-  NginxTask:
+  # Optimized Task Definition
+  rNginxTask:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
-      ExecutionRoleArn: !Ref NginxTaskExecRole
+      ExecutionRoleArn: !Ref rNginxTaskExecRole
+      TaskRoleArn: !Ref rNginxTaskRole
       NetworkMode: awsvpc
       ContainerDefinitions:
-        - Image: !Ref NginxImage
+        - Image: !Ref pNginxImage
           Name: Nginx
+          Essential: true
           PortMappings:
             - ContainerPort: 443
               Protocol: tcp
@@ -197,126 +317,141 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-region: !Ref 'AWS::Region'
-              awslogs-group: !Ref NginxLogGroup
+              awslogs-group: !Ref rNginxLogGroup
               awslogs-stream-prefix: lattice-ingress
           Ulimits:
             - HardLimit: 1048576
               Name: nofile
               SoftLimit: 1048576
-      Cpu: 2048
-      Memory: 4096
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'curl -f http://localhost:80/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref pEnvironment
+      Cpu: !FindInMap [EnvironmentMap, !Ref pEnvironment, CPU]
+      Memory: !FindInMap [EnvironmentMap, !Ref pEnvironment, Memory]
       RequiresCompatibilities:
         - FARGATE
       RuntimePlatform:
         CpuArchitecture: ARM64
         OperatingSystemFamily: LINUX
-      TaskRoleArn: !Ref NginxTaskRole
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-task'
 
-  NginxService:
+  # ECS Service with proper configuration
+  rNginxService:
     Type: 'AWS::ECS::Service'
     DependsOn:
-      - NginxExtNLBListener443
-      - NginxIntNLBListener443
-      - NginxExtNLBListener80
-      - NginxIntNLBListener80
+      - rNginxExtNLBListener443
+      - rNginxIntNLBListener443
+      - rNginxExtNLBListener80
+      - rNginxIntNLBListener80
     Properties:
-      Cluster: !Ref NginxCluster
+      Cluster: !Ref rNginxCluster
+      DesiredCount: !Ref pDesiredTaskCount
       EnableExecuteCommand: true
       LaunchType: FARGATE
+      PlatformVersion: LATEST
       LoadBalancers:
         - ContainerName: Nginx
           ContainerPort: 443
-          TargetGroupArn: !Ref NginxExtNLBTGroup443
+          TargetGroupArn: !Ref rNginxExtNLBTGroup443
         - ContainerName: Nginx
           ContainerPort: 443
-          TargetGroupArn: !Ref NginxIntNLBTGroup443
+          TargetGroupArn: !Ref rNginxIntNLBTGroup443
         - ContainerName: Nginx
           ContainerPort: 80
-          TargetGroupArn: !Ref NginxExtNLBTGroup80
+          TargetGroupArn: !Ref rNginxExtNLBTGroup80
         - ContainerName: Nginx
           ContainerPort: 80
-          TargetGroupArn: !Ref NginxIntNLBTGroup80
+          TargetGroupArn: !Ref rNginxIntNLBTGroup80
       NetworkConfiguration:
         AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
           SecurityGroups:
-            - !Ref NginxSecurityGroup
+            - !Ref rNginxSecurityGroup
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-            - !Ref PrivateSubnet3
+            - !Ref pPrivateSubnet1
+            - !Ref pPrivateSubnet2
+            - !Ref pPrivateSubnet3
       SchedulingStrategy: REPLICA
-      TaskDefinition: !Ref NginxTask
+      TaskDefinition: !Ref rNginxTask
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-service'
 
-  NginxSecurityGroup:
+  # Enhanced Security Group with clear descriptions
+  rNginxSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      VpcId: !Ref VpcId
-      GroupDescription: Nginx Security group
+      VpcId: !Ref pVpcId
+      GroupDescription: NGINX Security group - Least privilege access
       SecurityGroupIngress:
-        - CidrIp: !Ref VpcCidr
+        - CidrIp: !Ref pVpcCidr
           IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          Description: Ingress rule for tcp 443
-        - CidrIp: !Ref VpcCidr
+          Description: Allow ingress - HTTPS traffic from VPC to NGINX proxy
+        - CidrIp: !Ref pVpcCidr
           IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          Description: Ingress rule for tcp 80
+          Description: Allow ingress - HTTP traffic from VPC to NGINX proxy
       SecurityGroupEgress:
+        - CidrIp: !Ref pVpcCidr
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          Description: Allow egress - HTTPS from NGINX to VPC Lattice services
+        - CidrIp: !Ref pVpcCidr
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          Description: Allow egress - HTTP from NGINX to VPC Lattice services
         - CidrIp: 0.0.0.0/0
-          IpProtocol: '-1'
-          FromPort: -1
-          ToPort: -1
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          Description: Allow egress - HTTPS from NGINX for external dependencies
       Tags:
         - Key: Name
-          Value: Nginx SG
+          Value: !Sub '${pEnvironment}-nginx-sg'
+        - Key: Environment
+          Value: !Ref pEnvironment
 
-  NginxTaskExecRole:
+  # Enhanced IAM Roles
+  rNginxTaskExecRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      RoleName: !Sub '${pEnvironment}-nginx-exec-role'
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - ecs-tasks.amazonaws.com
-            Action:
-              - 'sts:AssumeRole'
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
-        - PolicyName: ecs-actions
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'ecr:GetAuthorizationToken'
-                  - 'ecr:BatchCheckLayerAvailability'
-                  - 'ecr:GetDownloadUrlForLayer'
-                  - 'ecr:BatchGetImage'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                  - 'ssmmessages:CreateControlChannel'
-                  - 'ssmmessages:CreateDataChannel'
-                  - 'ssmmessages:OpenControlChannel'
-                  - 'ssmmessages:OpenDataChannel'
-                Resource: '*'
-
-  NginxTaskRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ecs-tasks.amazonaws.com
-            Action:
-              - 'sts:AssumeRole'
-      Policies:
-        - PolicyName: ecs-actions
+        - PolicyName: ssm-access
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -327,45 +462,130 @@ Resources:
                   - 'ssmmessages:OpenControlChannel'
                   - 'ssmmessages:OpenDataChannel'
                 Resource: '*'
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-exec-role'
 
-  NginxScalableTarget:
+  rNginxTaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${pEnvironment}-nginx-task-role'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssmmessages:CreateControlChannel'
+                  - 'ssmmessages:CreateDataChannel'
+                  - 'ssmmessages:OpenControlChannel'
+                  - 'ssmmessages:OpenDataChannel'
+                Resource: '*'
+      Tags:
+        - Key: Environment
+          Value: !Ref pEnvironment
+        - Key: Name
+          Value: !Sub '${pEnvironment}-nginx-task-role'
+
+  # Auto Scaling with improved configuration
+  rNginxScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties: 
-      MaxCapacity: 9
-      MinCapacity: 3
-      ResourceId: !Join ['',['service/',!Ref NginxCluster,'/',!GetAtt NginxService.Name]]
+      MaxCapacity: !FindInMap [EnvironmentMap, !Ref pEnvironment, MaxCapacity]
+      MinCapacity: !FindInMap [EnvironmentMap, !Ref pEnvironment, MinCapacity]
+      ResourceId: !Sub 'service/${rNginxCluster}/${rNginxService.Name}'
       RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
       ScalableDimension: 'ecs:service:DesiredCount'
       ServiceNamespace: 'ecs'
       
-  NginxScalingPolicy:
+  rNginxScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties: 
-      PolicyName: !Join ['',['scaling-policy-',!GetAtt NginxService.Name]]
+      PolicyName: !Sub '${pEnvironment}-nginx-scaling-policy'
       PolicyType: 'TargetTrackingScaling'
-      ResourceId: !Join ['',['service/',!Ref NginxCluster,'/',!GetAtt NginxService.Name]]
+      ResourceId: !Sub 'service/${rNginxCluster}/${rNginxService.Name}'
       ScalableDimension: 'ecs:service:DesiredCount'
-      ScalingTargetId: !Ref NginxScalableTarget
+      ScalingTargetId: !Ref rNginxScalableTarget
       TargetTrackingScalingPolicyConfiguration:
         TargetValue: 70.0
-        ScaleInCooldown: 60
+        ScaleInCooldown: 300
         ScaleOutCooldown: 60
         PredefinedMetricSpecification:
           PredefinedMetricType: ECSServiceAverageCPUUtilization
 
 Outputs:
-  VpcId:
+  oVpcId:
     Description: ECS VPC ID
-    Value: !Ref VpcId
+    Value: !Ref pVpcId
     Export:
-      Name: !Sub ${AWS::StackName}-VpcId
-  NginxExtNLB:
-    Description: ECS External Load Balancer Name
-    Value: !GetAtt NginxExtNLB.DNSName
+      Name: !Sub '${AWS::StackName}-VpcId'
+  
+  oNginxExtNLB:
+    Description: ECS External Load Balancer DNS Name
+    Value: !GetAtt rNginxExtNLB.DNSName
     Export:
-      Name: !Sub ${AWS::StackName}-NginxExtNLB
-  NginxIntNLB:
-    Description: ECS Internal Load Balancer Name
-    Value: !GetAtt NginxIntNLB.DNSName
+      Name: !Sub '${AWS::StackName}-NginxExtNLB'
+
+  oNginxIntNLB:
+    Description: ECS Internal Load Balancer DNS Name
+    Value: !GetAtt rNginxIntNLB.DNSName
     Export:
-      Name: !Sub ${AWS::StackName}-NginxIntNLB
+      Name: !Sub '${AWS::StackName}-NginxIntNLB'
+  
+  oClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref rNginxCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+
+  oServiceName:
+    Description: ECS Service Name
+    Value: !Ref rNginxService
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceName'
+
+  oSecurityGroupId:
+    Description: NGINX Security Group ID
+    Value: !Ref rNginxSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+
+  oTaskDefinitionArn:
+    Description: NGINX Task Definition ARN
+    Value: !Ref rNginxTask
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+
+  oExtNLBTargetGroup443:
+    Description: External NLB Target Group 443 ARN
+    Value: !Ref rNginxExtNLBTGroup443
+    Export:
+      Name: !Sub '${AWS::StackName}-ExtNLBTargetGroup443'
+
+  oExtNLBTargetGroup80:
+    Description: External NLB Target Group 80 ARN
+    Value: !Ref rNginxExtNLBTGroup80
+    Export:
+      Name: !Sub '${AWS::StackName}-ExtNLBTargetGroup80'
+
+  oIntNLBTargetGroup443:
+    Description: Internal NLB Target Group 443 ARN
+    Value: !Ref rNginxIntNLBTGroup443
+    Export:
+      Name: !Sub '${AWS::StackName}-IntNLBTargetGroup443'
+
+  oIntNLBTargetGroup80:
+    Description: Internal NLB Target Group 80 ARN
+    Value: !Ref rNginxIntNLBTGroup80
+    Export:
+      Name: !Sub '${AWS::StackName}-IntNLBTargetGroup80'
